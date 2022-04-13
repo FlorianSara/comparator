@@ -51,9 +51,43 @@ final class ComparisonFailureTest extends TestCase
         $this->assertSame($message . $diff, $failure->toString());
     }
 
+    public function testComparisonFailurePartialDiff(): void
+    {
+        $actual = [];
+        $expected = [];
+
+        for($i = 1; $i < 10; $i++) {
+            $expected[] = sprintf('line%d', $i);
+            $actual[] = sprintf($i === 5 ? 'modified line%d' : 'line%d', $i);
+        }
+
+        $failure = new ComparisonFailure(
+            $expected,
+            $actual,
+            implode("\n", $expected),
+            implode("\n", $actual),
+        );
+
+        $diff = <<<TXT
+            \n--- Expected
+            +++ Actual
+            @@ @@
+            -skipping 2 lines...
+             line3
+             line4
+            -line5
+            +modified line5
+             line6
+             line7
+            +skipping 3 lines...\n
+            TXT;
+
+        $this->assertSame($diff, $failure->getPartialDiff(1, 5));
+    }
+
     public function testDiffNotPossible(): void
     {
-        $failure = new ComparisonFailure('a', 'b', false, false, true, 'test');
+        $failure = new ComparisonFailure('a', 'b', '', '', true, 'test');
         $this->assertSame('', $failure->getDiff());
         $this->assertSame('test', $failure->toString());
     }
