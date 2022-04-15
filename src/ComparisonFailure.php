@@ -105,18 +105,24 @@ class ComparisonFailure extends RuntimeException
         return $this->expectedAsString;
     }
 
-    /**
-     * @return string
-     */
     public function getDiff()
     {
-        if (!$this->actualAsString && !$this->expectedAsString) {
-            return '';
-        }
+        return $this->callDiffer($this->expectedAsString, $this->actualAsString);
+    }
 
-        $differ = new Differ(new UnifiedDiffOutputBuilder("\n--- Expected\n+++ Actual\n"));
+    /**   
+     * Gets the diff (same as getDiff), but ensure the inputs are not too big for the underlying diffs algorithms.
+     * 
+     * @param int $threshold triggers line skipping when expectedLines x actualLines > $threshold
+     * @param int $lineCount number of lines to display in the diff
+     * 
+     * @return string
+     */
+    public function getPartialDiff(int $threshold=1000000, int $lineCount = 20): string
+    {
+        [$expected, $actual] = $this->skipLines($threshold, $lineCount, $this->expectedAsString, $this->actualAsString);
 
-        return $differ->diff($this->expectedAsString, $this->actualAsString);
+        return $this->callDiffer($expected, $actual);
     }
 
     /**
@@ -125,5 +131,80 @@ class ComparisonFailure extends RuntimeException
     public function toString()
     {
         return $this->message . $this->getDiff();
+    }
+
+    private function callDiffer(string|array $expected, string|array $actual): string
+    {
+        if (!$actual && !$expected) {
+            return '';
+        }
+
+        $differ = new Differ(new UnifiedDiffOutputBuilder("\n--- Expected\n+++ Actual\n"));
+
+        return $differ->diff($expected, $actual);
+    }
+
+    /**
+     * reduce inputs to a $lineCount number of lines when $threshold is hit
+     * 
+     * @param int $threshold triggers line skipping when expectedLines x actualLines > $threshold
+     * @param int $lineCount number of lines to display in the diff
+     * @param string $expected
+     * @param string $actual
+     * 
+     * @return array
+     */
+    private function skipLines(int $threshold, int $lineCount, string $expected, string $actual): array
+    {
+        $expected = preg_split('/(.*\R)/', $expected, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+        $actual = preg_split('/(.*\R)/', $actual, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+
+        $expectedLines = count($expected);
+        $actualLines = count($actual);
+
+        if ($expectedLines * $actualLines < $threshold) {
+            return [
+                $expected,
+                $actual
+            ];
+        }
+
+        // searching for first diff
+        $diffIndex = -1;
+        for ($i = 0; $i < $expectedLines && $i < $actualLines; $i++) {
+            if ($expected[$i] !== $actual[$i]) {
+                $diffIndex = $i;
+                break;
+            }
+        }
+
+        if ($diffIndex < 0) {
+            return [
+                $expected,
+                $actual
+            ];
+        }
+
+        $from = max($diffIndex - (int)($lineCount / 2), 0);
+        $to = min($diffIndex + (int)($lineCount / 2), min($expectedLines, $actualLines));
+
+        $reducedExpected = [];
+        $reducedActual = [];
+
+        if ($from > 0) {
+            $reducedExpected[] = sprintf("skipping %d lines...\n", $from);
+        }
+
+        $reducedExpected = array_merge($reducedExpected, array_slice($expected, $from, $lineCount));
+        $reducedActual = array_slice($actual, $from, $lineCount);
+
+        if ($to < $expectedLines) {
+            $reducedActual[] = sprintf("skipping %d lines...\n", $expectedLines - $to);
+        }
+
+        return [
+            $reducedExpected,
+            $reducedActual
+        ];
     }
 }
